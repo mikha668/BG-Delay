@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#111111" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Time Shift Camera v0.2</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+      touch-action: manipulation;
+    }
+    #screen {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #000;
+    }
+    #captureCanvas {
+      position: fixed;
+      width: 2px;
+      height: 2px;
+      opacity: 0.001;
+      pointer-events: none;
+      left: -10px;
+      top: -10px;
+    }
+    #preview {
+      position: fixed;
+      top: max(58px, calc(env(safe-area-inset-top) + 48px));
+      right: 12px;
+      width: clamp(120px, 24vw, 240px);
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border: 2px solid rgba(255,255,255,.9);
+      border-radius: 12px;
+      background: #111;
+      box-shadow: 0 4px 18px rgba(0,0,0,.55);
+      z-index: 5;
+    }
+    #liveVideo {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #111;
+    }
+    #previewLabel {
+      position: absolute;
+      left: 7px;
+      bottom: 7px;
+      padding: 4px 7px;
+      border-radius: 999px;
+      background: rgba(0,0,0,.72);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      pointer-events: none;
+    }
+    .topbar {
+      position: fixed;
+      top: max(12px, env(safe-area-inset-top));
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .badge {
+      background: rgba(0,0,0,.62);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: .2px;
+    }
+    #status { color: #fff; }
+    #fpsBadge { color: #ddd; }
+    .controls {
+      position: fixed;
+      left: 50%;
+      bottom: max(16px, env(safe-area-inset-bottom));
+      transform: translateX(-50%);
+      width: min(760px, calc(100vw - 24px));
+      padding: 14px;
+      border-radius: 20px;
+      background: rgba(18,18,18,.78);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index: 10;
+      display: grid;
+      gap: 12px;
+    }
+    .delayrow {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+    #delayValue {
+      min-width: 56px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #fff;
+    }
+    .buttons {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+    }
+    button {
+      border: 0;
+      border-radius: 14px;
+      min-height: 48px;
+      padding: 10px 12px;
+      font: inherit;
+      font-weight: 650;
+      background: rgba(255,255,255,.13);
+      color: #fff;
+    }
+    button.primary {
+      background: #fff;
+      color: #111;
+    }
+    button.danger {
+      background: #9e3030;
+      color: #fff;
+    }
+    button:disabled { opacity: .45; }
+    .start {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      z-index: 20;
+      background: radial-gradient(circle at center, #242424 0%, #050505 70%);
+      padding: 24px;
+    }
+    .startcard {
+      width: min(520px, 100%);
+      text-align: center;
+      padding: 26px;
+      border-radius: 24px;
+      background: rgba(255,255,255,.08);
+    }
+    .startcard h1 { margin: 0 0 10px; font-size: clamp(26px, 6vw, 42px); }
+    .startcard p { color: #ccc; line-height: 1.45; margin: 0 0 20px; }
+    .startcard button { width: 100%; font-size: 18px; min-height: 58px; }
+    .note { margin-top: 12px; font-size: 13px; color: #aaa; }
+    @media (max-width: 600px) {
+      .buttons { grid-template-columns: repeat(2, 1fr); }
+      .controls { padding: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="preview" aria-label="Livebild från kameran">
+    <video id="liveVideo" autoplay playsinline muted></video>
+    <span id="previewLabel">LIVE</span>
+  </div>
+  <canvas id="captureCanvas"></canvas>
+  <canvas id="screen"></canvas>
+
+  <div class="topbar">
+    <div id="status" class="badge">Inte startad</div>
+    <div id="fpsBadge" class="badge">20 fps</div>
+  </div>
+
+  <div id="controls" class="controls" hidden>
+    <div class="delayrow">
+      <span>Delay</span>
+      <input id="delay" type="range" min="5" max="20" step="1" value="10" />
+      <span id="delayValue">10 s</span>
+    </div>
+    <div class="buttons">
+      <button id="cameraBtn">Byt kamera</button>
+      <button id="mirrorBtn">Spegling: av</button>
+      <button id="fullscreenBtn">Fullskärm</button>
+      <button id="restartBtn">Starta om</button>
+      <button id="stopBtn" class="danger">Stoppa video</button>
+    </div>
+  </div>
+
+  <div id="start" class="start">
+    <div class="startcard">
+      <h1>Brommagymnasterna Video Delay</h1>
+      <p>Kameran buffrar kontinuerligt och visar bilden 5–20 sekunder senare. Ingen video skickas någonstans eller sparas.</p>
+      <button id="startBtn" class="primary">Starta kameran</button>
+      <div class="note">Tips: använd liggande läge. HTTPS krävs när sidan ligger på webben.</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  // Enkel och robust MVP:
+  // Kameran fångas som JPEG-rutor i en ringbuffer.
+  // Detta undviker codec-/MediaRecorder-skillnader mellan iPad och Android.
+  const FPS = 20;
+  const CAPTURE_INTERVAL = 1000 / FPS;
+  const MAX_DELAY_MS = 22000;  // behåll lite mer än max 20 s
+  const CAPTURE_WIDTH = 1280;   // matchar vanlig 720p-kamera för tydligare bild
+  const LOG_PREFIX = "[Time Shift Camera]";
+
+  function log(level, message, details) {
+    const logger = console[level] || console.log;
+    const timestamp = new Date().toISOString();
+    if (details === undefined) logger.call(console, `${LOG_PREFIX} ${timestamp} ${message}`);
+    else logger.call(console, `${LOG_PREFIX} ${timestamp} ${message}`, details);
+  }
+
+  const video = document.getElementById("liveVideo");
+  const capture = document.getElementById("captureCanvas");
+  const cctx = capture.getContext("2d", { alpha: false });
+  const screen = document.getElementById("screen");
+  const sctx = screen.getContext("2d", { alpha: false });
+
+  const startOverlay = document.getElementById("start");
+  const controls = document.getElementById("controls");
+  const statusEl = document.getElementById("status");
+  const fpsBadge = document.getElementById("fpsBadge");
+  const delayInput = document.getElementById("delay");
+  const delayValue = document.getElementById("delayValue");
+  const cameraBtn = document.getElementById("cameraBtn");
+  const mirrorBtn = document.getElementById("mirrorBtn");
+  const fullscreenBtn = document.getElementById("fullscreenBtn");
+  const restartBtn = document.getElementById("restartBtn");
+  const stopBtn = document.getElementById("stopBtn");
+
+  let stream = null;
+  let facingMode = "environment";
+  let mirrored = false;
+  let frames = []; // { t, blob }
+  let captureTimer = null;
+  let captureBusy = false;
+  let startedAt = 0;
+  let running = false;
+
+  let displayedFrame = null;
+  let displayedTime = -1;
+  let drawBusy = false;
+  let capturedFrameCount = 0;
+  let lastCaptureLogAt = 0;
+
+  log("info", "Sidan laddad", {
+    secureContext: window.isSecureContext,
+    protocol: window.location.protocol,
+    mediaDevicesAvailable: !!navigator.mediaDevices,
+    getUserMediaAvailable: !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia),
+    userAgent: navigator.userAgent
+  });
+
+  ["loadedmetadata", "loadeddata", "canplay", "playing", "pause", "stalled", "suspend", "emptied", "error"]
+    .forEach(eventName => video.addEventListener(eventName, event => {
+      const details = {
+        event: eventName,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        readyState: video.readyState,
+        networkState: video.networkState,
+        paused: video.paused,
+        currentTime: video.currentTime
+      };
+      if (video.error) details.mediaError = { code: video.error.code, message: video.error.message };
+      log(eventName === "error" || eventName === "stalled" ? "warn" : "info", "Video-element händelse", details);
+    }));
+
+  window.addEventListener("error", event => {
+    log("error", "JavaScript-fel", { message: event.message, filename: event.filename, line: event.lineno, column: event.colno, error: event.error });
+  });
+  window.addEventListener("unhandledrejection", event => {
+    log("error", "Ohanterat Promise-fel", event.reason);
+  });
+
+  function setStatus(text) {
+    statusEl.textContent = text;
+  }
+
+  function resizeScreen() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = Math.max(1, Math.round(window.innerWidth * dpr));
+    const h = Math.max(1, Math.round(window.innerHeight * dpr));
+    if (screen.width !== w || screen.height !== h) {
+      screen.width = w;
+      screen.height = h;
+    }
+  }
+
+  function configureCaptureCanvas() {
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    const scale = Math.min(1, CAPTURE_WIDTH / vw);
+    capture.width = Math.max(2, Math.round(vw * scale));
+    capture.height = Math.max(2, Math.round(vh * scale));
+  }
+
+  function clearBuffer() {
+    frames = [];
+    startedAt = performance.now();
+    displayedTime = -1;
+    if (displayedFrame && displayedFrame.close) displayedFrame.close();
+    displayedFrame = null;
+  }
+
+  async function stopCamera() {
+    log("info", "stopCamera anropad", { running, hasStream: !!stream });
+    running = false;
+    if (captureTimer) {
+      clearInterval(captureTimer);
+      captureTimer = null;
+    }
+    const activeStream = stream || video.srcObject;
+    if (activeStream && typeof activeStream.getTracks === "function") {
+      activeStream.getTracks().forEach(track => {
+        log("info", "Stoppar kameraspår", { kind: track.kind, readyState: track.readyState, settings: track.getSettings ? track.getSettings() : undefined });
+        track.stop();
+        log("info", "Kameraspår stoppat", { kind: track.kind, readyState: track.readyState });
+      });
+    } else {
+      log("warn", "Inget aktivt MediaStream hittades att stoppa");
+    }
+    stream = null;
+    video.pause();
+    video.srcObject = null;
+    clearBuffer();
+    log("info", "Kamera och buffert rensade");
+  }
+
+  function waitForVideoReady() {
+    log("info", "Väntar på videobild", { videoWidth: video.videoWidth, videoHeight: video.videoHeight, readyState: video.readyState });
+    return new Promise((resolve, reject) => {
+      let timeout;
+      const cleanup = () => {
+        clearTimeout(timeout);
+        video.removeEventListener("loadedmetadata", checkReady);
+        video.removeEventListener("loadeddata", checkReady);
+        video.removeEventListener("error", onError);
+      };
+      const checkReady = () => {
+        if (video.videoWidth > 0 && video.videoHeight > 0) {
+          cleanup();
+          log("info", "Videobild redo", { videoWidth: video.videoWidth, videoHeight: video.videoHeight, readyState: video.readyState });
+          resolve();
+        }
+      };
+      const onError = () => {
+        cleanup();
+        const error = new Error("Kameran startade, men webbläsaren kunde inte läsa videobilden.");
+        log("error", "Video-elementet rapporterade fel", { error, mediaError: video.error && { code: video.error.code, message: video.error.message } });
+        reject(error);
+      };
+
+      video.addEventListener("loadedmetadata", checkReady);
+      video.addEventListener("loadeddata", checkReady);
+      video.addEventListener("error", onError);
+      timeout = setTimeout(() => {
+        cleanup();
+        const error = new Error("Kameran svarar inte med någon videobild. Kontrollera att den inte används av en annan app.");
+        log("error", "Timeout: videobild saknas", { error, videoWidth: video.videoWidth, videoHeight: video.videoHeight, readyState: video.readyState, paused: video.paused, hasSrcObject: !!video.srcObject });
+        reject(error);
+      }, 10000);
+      checkReady();
+    });
+  }
+
+  async function startCamera() {
+    log("info", "startCamera påbörjad", { facingMode, secureContext: window.isSecureContext });
+    await stopCamera();
+    setStatus("Startar kamera…");
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const error = new Error("Den här webbläsaren saknar stöd för kameran via getUserMedia.");
+      log("error", "getUserMedia saknas", { error, secureContext: window.isSecureContext, protocol: window.location.protocol });
+      throw error;
+    }
+
+    const constraints = {
+      audio: false,
+      video: {
+        facingMode: { ideal: facingMode },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        frameRate: { ideal: 30, max: 30 }
+      }
+    };
+    log("info", "Begär kamerabehörighet / getUserMedia", constraints);
+    try {
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      log("error", "getUserMedia misslyckades", { name: error.name, message: error.message, constraint: error.constraint, error });
+      throw error;
+    }
+
+    log("info", "getUserMedia lyckades; kameraspår", stream.getTracks().map(track => ({
+      kind: track.kind,
+      readyState: track.readyState,
+      enabled: track.enabled,
+      muted: track.muted,
+      settings: track.getSettings ? track.getSettings() : undefined
+    })));
+    stream.getTracks().forEach(track => {
+      track.addEventListener("ended", () => log("warn", "Kameraspår avslutades", { kind: track.kind, readyState: track.readyState }));
+      track.addEventListener("mute", () => log("warn", "Kameraspår muted", { kind: track.kind, readyState: track.readyState }));
+      track.addEventListener("unmute", () => log("info", "Kameraspår unmuted", { kind: track.kind, readyState: track.readyState }));
+    });
+
+    video.srcObject = stream;
+    const videoReady = waitForVideoReady();
+    try {
+      await Promise.all([video.play(), videoReady]);
+    } catch (error) {
+      log("error", "video.play eller väntan på videobild misslyckades", { name: error.name, message: error.message, error });
+      throw error;
+    }
+
+    configureCaptureCanvas();
+    clearBuffer();
+    capturedFrameCount = 0;
+    lastCaptureLogAt = 0;
+    running = true;
+
+    captureTimer = setInterval(captureFrame, CAPTURE_INTERVAL);
+    captureFrame();
+    requestAnimationFrame(renderLoop);
+
+    startOverlay.hidden = true;
+    controls.hidden = false;
+    setStatus("Buffrar…");
+    log("info", "Kamerastart klar", { videoWidth: video.videoWidth, videoHeight: video.videoHeight, captureWidth: capture.width, captureHeight: capture.height, readyState: video.readyState });
+  }
+
+  function captureFrame() {
+    if (!running || captureBusy || video.readyState < 2) {
+      if (running && video.readyState < 2 && capturedFrameCount === 0) {
+        log("warn", "Kan inte fånga bild ännu", { readyState: video.readyState, videoWidth: video.videoWidth, videoHeight: video.videoHeight, paused: video.paused });
+      }
+      return;
+    }
+    captureBusy = true;
+
+    try {
+      cctx.drawImage(video, 0, 0, capture.width, capture.height);
+      const timestamp = performance.now();
+
+      capture.toBlob(blob => {
+        if (blob && running) {
+          frames.push({ t: timestamp, blob });
+          capturedFrameCount++;
+          const now = performance.now();
+          if (capturedFrameCount === 1 || now - lastCaptureLogAt >= 5000) {
+            lastCaptureLogAt = now;
+            log("info", "Kamerarutor fångas", { capturedFrameCount, bufferedFrames: frames.length, latestFrameBytes: blob.size, videoReadyState: video.readyState, videoWidth: video.videoWidth, videoHeight: video.videoHeight });
+          }
+
+          // Ringbuffer: kasta sådant som är äldre än maxfördröjningen.
+          const cutoff = performance.now() - MAX_DELAY_MS;
+          let removeCount = 0;
+          while (removeCount < frames.length && frames[removeCount].t < cutoff) removeCount++;
+          if (removeCount) frames.splice(0, removeCount);
+        } else if (!blob) {
+          log("error", "canvas.toBlob returnerade ingen bild", { running, captureWidth: capture.width, captureHeight: capture.height });
+        }
+        captureBusy = false;
+      }, "image/jpeg", 0.78);
+    } catch (err) {
+      captureBusy = false;
+      log("error", "Fel vid fångst av kamerabild", err);
+    }
+  }
+
+  function findFrame(targetTime) {
+    // Hitta senaste frame som inte är nyare än targetTime.
+    // Vi söker bakifrån eftersom den oftast ligger nära slutet.
+    for (let i = frames.length - 1; i >= 0; i--) {
+      if (frames[i].t <= targetTime) return frames[i];
+    }
+    return null;
+  }
+
+  async function decodeAndDisplay(frame) {
+    if (!frame || drawBusy || frame.t === displayedTime) return;
+    drawBusy = true;
+    try {
+      let bitmap;
+      if ("createImageBitmap" in window) {
+        bitmap = await createImageBitmap(frame.blob);
+      } else {
+        bitmap = await blobToImage(frame.blob);
+      }
+
+      if (displayedFrame && displayedFrame.close) displayedFrame.close();
+      displayedFrame = bitmap;
+      displayedTime = frame.t;
+    } catch (err) {
+      log("warn", "Kunde inte avkoda kameraruta", err);
+    } finally {
+      drawBusy = false;
+    }
+  }
+
+  function blobToImage(blob) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = err => {
+        URL.revokeObjectURL(url);
+        reject(err);
+      };
+      img.src = url;
+    });
+  }
+
+  function drawCurrentFrame() {
+    resizeScreen();
+    const W = screen.width;
+    const H = screen.height;
+
+    sctx.fillStyle = "#000";
+    sctx.fillRect(0, 0, W, H);
+
+    if (!displayedFrame) return;
+
+    const iw = displayedFrame.width || displayedFrame.naturalWidth;
+    const ih = displayedFrame.height || displayedFrame.naturalHeight;
+    const scale = Math.min(W / iw, H / ih);
+    const dw = iw * scale;
+    const dh = ih * scale;
+    const dx = (W - dw) / 2;
+    const dy = (H - dh) / 2;
+
+    sctx.save();
+    if (mirrored) {
+      sctx.translate(W, 0);
+      sctx.scale(-1, 1);
+      sctx.drawImage(displayedFrame, W - dx - dw, dy, dw, dh);
+    } else {
+      sctx.drawImage(displayedFrame, dx, dy, dw, dh);
+    }
+    sctx.restore();
+  }
+
+  function drawCountdown(secondsRemaining) {
+    const W = screen.width;
+    const H = screen.height;
+    const centerX = W / 2;
+    const centerY = H / 2;
+
+    sctx.save();
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+    sctx.fillStyle = "rgba(0, 0, 0, 0.58)";
+    sctx.fillRect(centerX - 150, centerY - 125, 300, 250);
+
+    sctx.fillStyle = "#fff";
+    sctx.font = `600 ${Math.round(Math.min(W, H) * 0.035)}px system-ui, sans-serif`;
+    sctx.fillText("FÖRDRÖJD BILD OM", centerX, centerY - 67);
+    sctx.font = `700 ${Math.round(Math.min(W, H) * 0.14)}px system-ui, sans-serif`;
+    sctx.fillText(String(secondsRemaining), centerX, centerY + 8);
+    sctx.font = `500 ${Math.round(Math.min(W, H) * 0.032)}px system-ui, sans-serif`;
+    sctx.fillText(secondsRemaining === 1 ? "sekund" : "sekunder", centerX, centerY + 83);
+    sctx.restore();
+  }
+
+  function renderLoop() {
+    if (!running) return;
+
+    const now = performance.now();
+    const delayMs = Number(delayInput.value) * 1000;
+    const age = now - startedAt;
+
+    if (age < delayMs) {
+      const secondsRemaining = Math.max(1, Math.ceil((delayMs - age) / 1000));
+      setStatus(`Fördröjd bild om ${secondsRemaining} s`);
+      drawCurrentFrame();
+      drawCountdown(secondsRemaining);
+    } else if (frames.length > 0) {
+      const target = now - delayMs;
+      const frame = findFrame(target);
+      if (frame) {
+        decodeAndDisplay(frame);
+        setStatus(`${delayInput.value} s fördröjning`);
+      }
+      drawCurrentFrame();
+    } else {
+      drawCurrentFrame();
+    }
+
+    requestAnimationFrame(renderLoop);
+  }
+
+  delayInput.addEventListener("input", () => {
+    delayValue.textContent = `${delayInput.value} s`;
+  });
+
+  fpsBadge.textContent = `${FPS} fps`;
+
+  document.getElementById("startBtn").addEventListener("click", async () => {
+    log("info", "Användaren tryckte på Starta kameran");
+    try {
+      await startCamera();
+    } catch (err) {
+      log("error", "Kamerastart misslyckades", err);
+      await stopCamera();
+      setStatus("Kamerafel");
+      alert("Kunde inte starta kameran.\n\n" + (err.message || err) +
+            "\n\nKontrollera kamerabehörighet och att sidan körs via HTTPS.");
+    }
+  });
+
+  cameraBtn.addEventListener("click", async () => {
+    facingMode = facingMode === "environment" ? "user" : "environment";
+    log("info", "Användaren byter kamera", { facingMode });
+    try {
+      await startCamera();
+    } catch (err) {
+      log("error", "Kamerabyte misslyckades", err);
+      await stopCamera();
+      alert("Kunde inte byta kamera: " + (err.message || err));
+    }
+  });
+
+  mirrorBtn.addEventListener("click", () => {
+    mirrored = !mirrored;
+    mirrorBtn.textContent = `Spegling: ${mirrored ? "på" : "av"}`;
+  });
+
+  fullscreenBtn.addEventListener("click", async () => {
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      } else if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+    } catch (_) {
+      // iPad/Safari kan ignorera vanlig Fullscreen API.
+      alert("Fullskärm stöds inte här. Lägg sidan på hemskärmen för app-liknande fullskärmsläge.");
+    }
+  });
+
+  restartBtn.addEventListener("click", async () => {
+    log("info", "Användaren tryckte på Starta om");
+    try {
+      await startCamera();
+    } catch (err) {
+      log("error", "Omstart av kameran misslyckades", err);
+      await stopCamera();
+      alert("Kunde inte starta om kameran: " + (err.message || err));
+    }
+  });
+
+  stopBtn.addEventListener("click", async () => {
+    log("info", "Användaren tryckte på Stoppa video");
+    await stopCamera();
+    controls.hidden = true;
+    startOverlay.hidden = false;
+    setStatus("Video stoppad");
+    resizeScreen();
+    sctx.fillStyle = "#000";
+    sctx.fillRect(0, 0, screen.width, screen.height);
+  });
+
+  window.addEventListener("resize", resizeScreen);
+  window.addEventListener("orientationchange", resizeScreen);
+  document.addEventListener("visibilitychange", () => {
+    log("info", "visibilitychange", { hidden: document.hidden, visibilityState: document.visibilityState });
+    if (document.hidden) setStatus("Pausad i bakgrunden");
+  });
+
+  window.addEventListener("pagehide", () => {
+    log("info", "Sidan lämnas", {
+      hasStream: !!stream,
+      tracks: stream && stream.getTracks().map(track => ({ kind: track.kind, readyState: track.readyState }))
+    });
+  });
+
+  resizeScreen();
+})();
+</script>
+</body>
+</html>
