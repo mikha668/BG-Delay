@@ -209,7 +209,7 @@
       <h1>Brommagymnasterna Träningsreplay</h1>
       <p>Kameran buffrar kontinuerligt och visar bilden 5–20 sekunder senare. Ingen video skickas någonstans eller sparas.</p>
       <button id="startBtn" class="primary">Starta kameran</button>
-      <div class="note">Tips: använd gärna liggande läge.</div>
+      <div class="note">Tips: Välj dela --> Spara på hemskärmen för att anävnda som en app offline</div>
     </div>
   </div>
 
@@ -217,7 +217,7 @@
 (() => {
   "use strict";
 
-  // Enkel och robust MVP:
+  // 2026 Mikael Deerkert
   // Kameran fångas som JPEG-rutor i en ringbuffer.
   // Detta undviker codec-/MediaRecorder-skillnader mellan iPad och Android.
   const FPS = 20;
