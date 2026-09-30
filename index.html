@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111111" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>BG Delay v0.22</title>
+  <title>BG Delay v0.23</title>
   <style>
     :root {
       color-scheme: dark;
@@ -72,6 +72,15 @@
       letter-spacing: .04em;
       pointer-events: none;
     }
+    #preview.paused #previewLabel {
+      left: 50%;
+      top: 50%;
+      bottom: auto;
+      transform: translate(-50%, -50%);
+      padding: 7px 12px;
+      background: rgba(0,0,0,.78);
+      font-size: 14px;
+    }
     .topbar {
       position: fixed;
       top: max(12px, env(safe-area-inset-top));
@@ -100,7 +109,7 @@
       left: 50%;
       bottom: max(16px, env(safe-area-inset-bottom));
       transform: translateX(-50%);
-      width: min(760px, calc(100vw - 24px));
+      width: min(640px, calc(100vw - 24px));
       padding: 14px;
       border-radius: 20px;
       background: rgba(18,18,18,.78);
@@ -128,7 +137,7 @@
     }
     .buttons {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px;
     }
     button {
@@ -147,6 +156,10 @@
     }
     button.danger {
       background: #9e3030;
+      color: #fff;
+    }
+    button.resume {
+      background: #248a4a;
       color: #fff;
     }
     button:disabled { opacity: .45; }
@@ -199,17 +212,16 @@
       <button id="cameraBtn">Byt kamera</button>
       <button id="mirrorBtn">Spegling: av</button>
       <button id="fullscreenBtn">Fullskärm</button>
-      <button id="restartBtn">Starta om</button>
-      <button id="stopBtn" class="danger">Stoppa video</button>
+      <button id="stopBtn" class="danger">Pausa video</button>
     </div>
   </div>
 
   <div id="start" class="start">
     <div class="startcard">
-      <h1>Brommagymnasterna Träningsreplay</h1>
+      <h1>Brommagymnasterna Övningsreplay</h1>
       <p>Kameran buffrar kontinuerligt och visar bilden 5–20 sekunder senare. Ingen video skickas någonstans eller sparas.</p>
       <button id="startBtn" class="primary">Starta kameran</button>
-      <div class="note">Tips: Välj dela --> Spara på hemskärmen för att anävnda som en app offline</div>
+      <div class="note">Tips: Välj dela --> Spara på hemskärmen för att använda som en app offline</div>
     </div>
   </div>
 
@@ -248,8 +260,9 @@
   const cameraBtn = document.getElementById("cameraBtn");
   const mirrorBtn = document.getElementById("mirrorBtn");
   const fullscreenBtn = document.getElementById("fullscreenBtn");
-  const restartBtn = document.getElementById("restartBtn");
   const stopBtn = document.getElementById("stopBtn");
+  const preview = document.getElementById("preview");
+  const previewLabel = document.getElementById("previewLabel");
 
   let stream = null;
   let facingMode = "environment";
@@ -350,6 +363,57 @@
     log("info", "Kamera och buffert rensade");
   }
 
+  async function pauseCamera() {
+    log("info", "Pausar kamerafeeden utan att släppa kamerabehörigheten", { hasStream: !!stream });
+    running = false;
+    if (captureTimer) {
+      clearInterval(captureTimer);
+      captureTimer = null;
+    }
+    if (stream) stream.getTracks().forEach(track => { track.enabled = false; });
+    video.pause();
+    clearBuffer();
+  }
+
+  function startCapturePipeline() {
+    configureCaptureCanvas();
+    clearBuffer();
+    capturedFrameCount = 0;
+    lastCaptureLogAt = 0;
+    running = true;
+
+    captureTimer = setInterval(captureFrame, CAPTURE_INTERVAL);
+    captureFrame();
+    requestAnimationFrame(renderLoop);
+
+    startOverlay.hidden = true;
+    controls.hidden = false;
+    stopBtn.textContent = "Pausa video";
+    stopBtn.classList.remove("resume");
+    preview.classList.remove("paused");
+    previewLabel.textContent = "LIVE";
+    setStatus("Buffrar…");
+    log("info", "Kamerastart klar", { videoWidth: video.videoWidth, videoHeight: video.videoHeight, captureWidth: capture.width, captureHeight: capture.height, readyState: video.readyState });
+  }
+
+  async function resumeCamera() {
+    const activeVideoTracks = stream && stream.getVideoTracks().filter(track => track.readyState === "live");
+    if (!activeVideoTracks || activeVideoTracks.length === 0) {
+      await startCamera();
+      return;
+    }
+
+    setStatus("Startar kamera…");
+    activeVideoTracks.forEach(track => { track.enabled = true; });
+    try {
+      await video.play();
+    } catch (error) {
+      activeVideoTracks.forEach(track => { track.enabled = false; });
+      throw error;
+    }
+    startCapturePipeline();
+  }
+
   function waitForVideoReady() {
     log("info", "Väntar på videobild", { videoWidth: video.videoWidth, videoHeight: video.videoHeight, readyState: video.readyState });
     return new Promise((resolve, reject) => {
@@ -437,20 +501,7 @@
       throw error;
     }
 
-    configureCaptureCanvas();
-    clearBuffer();
-    capturedFrameCount = 0;
-    lastCaptureLogAt = 0;
-    running = true;
-
-    captureTimer = setInterval(captureFrame, CAPTURE_INTERVAL);
-    captureFrame();
-    requestAnimationFrame(renderLoop);
-
-    startOverlay.hidden = true;
-    controls.hidden = false;
-    setStatus("Buffrar…");
-    log("info", "Kamerastart klar", { videoWidth: video.videoWidth, videoHeight: video.videoHeight, captureWidth: capture.width, captureHeight: capture.height, readyState: video.readyState });
+    startCapturePipeline();
   }
 
   function captureFrame() {
@@ -665,26 +716,39 @@
     }
   });
 
-  restartBtn.addEventListener("click", async () => {
-    log("info", "Användaren tryckte på Starta om");
-    try {
-      await startCamera();
-    } catch (err) {
-      log("error", "Omstart av kameran misslyckades", err);
-      await stopCamera();
-      alert("Kunde inte starta om kameran: " + (err.message || err));
-    }
-  });
-
   stopBtn.addEventListener("click", async () => {
-    log("info", "Användaren tryckte på Stoppa video");
-    await stopCamera();
-    controls.hidden = true;
-    startOverlay.hidden = false;
-    setStatus("Video stoppad");
-    resizeScreen();
-    sctx.fillStyle = "#000";
-    sctx.fillRect(0, 0, screen.width, screen.height);
+    stopBtn.disabled = true;
+    try {
+      if (running) {
+        log("info", "Användaren pausade videon");
+        await pauseCamera();
+        stopBtn.textContent = "Återuppta";
+        stopBtn.classList.add("resume");
+        preview.classList.add("paused");
+        previewLabel.textContent = "PAUSAD";
+        setStatus("Video pausad");
+        resizeScreen();
+        sctx.fillStyle = "#000";
+        sctx.fillRect(0, 0, screen.width, screen.height);
+        return;
+      }
+
+      log("info", "Användaren återupptog videon");
+      try {
+        await resumeCamera();
+      } catch (err) {
+        log("error", "Det gick inte att återuppta videon", err);
+        await pauseCamera();
+        stopBtn.textContent = "Återuppta";
+        stopBtn.classList.add("resume");
+        preview.classList.add("paused");
+        previewLabel.textContent = "PAUSAD";
+        setStatus("Kamerafel");
+        alert("Kunde inte återuppta videon: " + (err.message || err));
+      }
+    } finally {
+      stopBtn.disabled = false;
+    }
   });
 
   window.addEventListener("resize", resizeScreen);
