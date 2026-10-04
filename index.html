@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#111111" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <title>BG Delay v0.23</title>
+  <title>BG Delay</title>
   <style>
     :root {
       color-scheme: dark;
@@ -118,6 +118,9 @@
       bottom: max(16px, env(safe-area-inset-bottom));
       transform: translateX(-50%);
       width: min(640px, calc(100vw - 24px));
+      max-height: calc(100vh - 28px);
+      max-height: calc(100dvh - 28px);
+      overflow-y: auto;
       padding: 14px;
       border-radius: 20px;
       background: rgba(18,18,18,.78);
@@ -126,6 +129,20 @@
       z-index: 10;
       display: grid;
       gap: 12px;
+    }
+    #debugLog {
+      max-height: 24vh;
+      overflow: auto;
+      margin: 0;
+      padding: 10px;
+      border-radius: 10px;
+      background: rgba(0,0,0,.55);
+      color: #ddd;
+      font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      touch-action: pan-y;
+      overscroll-behavior: contain;
     }
     .delayrow {
       display: grid;
@@ -230,12 +247,13 @@
       <button id="fullscreenBtn">Fullskärm</button>
       <button id="stopBtn" class="danger">Pausa video</button>
     </div>
+    <pre id="debugLog" role="log" aria-label="Teknisk logg" aria-live="off" hidden></pre>
   </div>
 
   <div id="start" class="start">
     <div class="startcard">
       <h1>Brommagymnasterna Övningsreplay</h1>
-      <p>Kameran buffrar kontinuerligt och visar bilden 5–20 sekunder senare. Ingen video skickas någonstans eller sparas.</p>
+      <p>Kameran buffrar kontinuerligt och visar bilden 5–20 sekunder senare. Ingen video skickas någonstans eller sparas. (ver 0.91)</p>
       <button id="startBtn" class="primary">Starta kameran</button>
       <div class="note">Tips: Välj dela --> Spara på hemskärmen för att använda som en app offline</div>
     </div>
@@ -253,13 +271,39 @@
   const MAX_DELAY_MS = 22000;  // behåll lite mer än max 20 s
   const CAPTURE_WIDTH = 960;    // minskar kodningslast och minnesåtgång på iPad
   const JPEG_QUALITY = 0.68;
+  const DEBUG_LOG_ENABLED = true; // sätt false för att stänga av loggning
+  const MAX_LOG_ENTRIES = 100;
   const LOG_PREFIX = "[Time Shift Camera]";
+  const debugLog = document.getElementById("debugLog");
+  const logEntries = [];
+  debugLog.hidden = !DEBUG_LOG_ENABLED;
 
   function log(level, message, details) {
+    if (!DEBUG_LOG_ENABLED) return;
+
     const logger = console[level] || console.log;
     const timestamp = new Date().toISOString();
-    if (details === undefined) logger.call(console, `${LOG_PREFIX} ${timestamp} ${message}`);
-    else logger.call(console, `${LOG_PREFIX} ${timestamp} ${message}`, details);
+    const entry = `${timestamp} ${level.toUpperCase()} ${message}`;
+    if (details === undefined) {
+      logger.call(console, `${LOG_PREFIX} ${entry}`);
+    } else {
+      logger.call(console, `${LOG_PREFIX} ${entry}`, details);
+      let formattedDetails;
+      try {
+        formattedDetails = JSON.stringify(details, (_key, value) => {
+          if (value instanceof Error) return { name: value.name, message: value.message, stack: value.stack };
+          return value;
+        });
+      } catch (error) {
+        formattedDetails = `[Kunde inte formatera loggdetaljer: ${error.message}]`;
+      }
+      logEntries.push(`${entry} ${formattedDetails || String(details)}`);
+    }
+
+    if (details === undefined) logEntries.push(entry);
+    if (logEntries.length > MAX_LOG_ENTRIES) logEntries.splice(0, logEntries.length - MAX_LOG_ENTRIES);
+    debugLog.textContent = logEntries.join("\n");
+    debugLog.scrollTop = debugLog.scrollHeight;
   }
 
   const video = document.getElementById("liveVideo");
