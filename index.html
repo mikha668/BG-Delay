@@ -102,6 +102,14 @@
       font-weight: 650;
       letter-spacing: .2px;
     }
+    .topbarStats {
+      display: flex;
+      gap: 6px;
+    }
+    #memoryBadge {
+      color: #ddd;
+      font-size: 12px;
+    }
     #status { color: #fff; }
     #fpsBadge { color: #ddd; }
     .controls {
@@ -187,6 +195,11 @@
       .buttons { grid-template-columns: repeat(2, 1fr); }
       .controls { padding: 12px; }
     }
+    @media (max-width: 380px) {
+      .topbar .badge { padding: 6px 8px; font-size: 12px; }
+      .topbarStats { gap: 4px; }
+      #memoryBadge { font-size: 10px; }
+    }
   </style>
 </head>
 <body>
@@ -199,7 +212,10 @@
 
   <div class="topbar">
     <div id="status" class="badge">Inte startad</div>
-    <div id="fpsBadge" class="badge">20 fps</div>
+    <div class="topbarStats">
+      <div id="memoryBadge" class="badge" title="Uppskattning av JPEG-data i bufferten. Faktisk minnesanvändning kan vara högre.">Minne: ~0 kB</div>
+      <div id="fpsBadge" class="badge">20 fps</div>
+    </div>
   </div>
 
   <div id="controls" class="controls" hidden>
@@ -235,7 +251,8 @@
   const FPS = 20;
   const CAPTURE_INTERVAL = 1000 / FPS;
   const MAX_DELAY_MS = 22000;  // behåll lite mer än max 20 s
-  const CAPTURE_WIDTH = 1280;   // matchar vanlig 720p-kamera för tydligare bild
+  const CAPTURE_WIDTH = 960;    // minskar kodningslast och minnesåtgång på iPad
+  const JPEG_QUALITY = 0.68;
   const LOG_PREFIX = "[Time Shift Camera]";
 
   function log(level, message, details) {
@@ -255,6 +272,7 @@
   const controls = document.getElementById("controls");
   const statusEl = document.getElementById("status");
   const fpsBadge = document.getElementById("fpsBadge");
+  const memoryBadge = document.getElementById("memoryBadge");
   const delayInput = document.getElementById("delay");
   const delayValue = document.getElementById("delayValue");
   const cameraBtn = document.getElementById("cameraBtn");
@@ -268,6 +286,7 @@
   let facingMode = "environment";
   let mirrored = false;
   let frames = []; // { t, blob }
+  let bufferedBytes = 0;
   let captureTimer = null;
   let captureBusy = false;
   let startedAt = 0;
@@ -313,6 +332,14 @@
     statusEl.textContent = text;
   }
 
+  function updateMemoryBadge() {
+    const megabyte = 1024 * 1024;
+    const size = bufferedBytes < megabyte
+      ? `${Math.round(bufferedBytes / 1024).toLocaleString("sv-SE")} kB`
+      : `${(bufferedBytes / megabyte).toLocaleString("sv-SE", { maximumFractionDigits: 1 })} MB`;
+    memoryBadge.textContent = `Minne: ~${size}`;
+  }
+
   function resizeScreen() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.max(1, Math.round(window.innerWidth * dpr));
@@ -333,6 +360,8 @@
 
   function clearBuffer() {
     frames = [];
+    bufferedBytes = 0;
+    updateMemoryBadge();
     startedAt = performance.now();
     displayedTime = -1;
     if (displayedFrame && displayedFrame.close) displayedFrame.close();
@@ -520,6 +549,7 @@
       capture.toBlob(blob => {
         if (blob && running) {
           frames.push({ t: timestamp, blob });
+          bufferedBytes += blob.size;
           capturedFrameCount++;
           const now = performance.now();
           if (capturedFrameCount === 1 || now - lastCaptureLogAt >= 5000) {
@@ -531,12 +561,16 @@
           const cutoff = performance.now() - MAX_DELAY_MS;
           let removeCount = 0;
           while (removeCount < frames.length && frames[removeCount].t < cutoff) removeCount++;
-          if (removeCount) frames.splice(0, removeCount);
+          if (removeCount) {
+            for (let i = 0; i < removeCount; i++) bufferedBytes -= frames[i].blob.size;
+            frames.splice(0, removeCount);
+          }
+          updateMemoryBadge();
         } else if (!blob) {
           log("error", "canvas.toBlob returnerade ingen bild", { running, captureWidth: capture.width, captureHeight: capture.height });
         }
         captureBusy = false;
-      }, "image/jpeg", 0.78);
+      }, "image/jpeg", JPEG_QUALITY);
     } catch (err) {
       captureBusy = false;
       log("error", "Fel vid fångst av kamerabild", err);
