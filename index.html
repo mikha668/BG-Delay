@@ -253,7 +253,7 @@
   <div id="start" class="start">
     <div class="startcard">
       <h1>Brommagymnasterna Övningsreplay</h1>
-      <p>Kameran buffrar kontinuerligt och visar bilden 5–20 sekunder senare. Ingen video skickas någonstans eller sparas. (ver 0.91)</p>
+      <p>Kameran buffrar kontinuerligt och visar bilden 5–20 sekunder senare. Ingen video skickas någonstans eller sparas. (ver 0.92)</p>
       <button id="startBtn" class="primary">Starta kameran</button>
       <div class="note">Tips: Välj dela --> Spara på hemskärmen för att använda som en app offline</div>
     </div>
@@ -270,9 +270,9 @@
   const CAPTURE_INTERVAL = 1000 / FPS;
   const MAX_DELAY_MS = 22000;  // behåll lite mer än max 20 s
   const CAPTURE_WIDTH = 960;    // minskar kodningslast och minnesåtgång på iPad
-  const JPEG_QUALITY = 0.68;
-  const DEBUG_LOG_ENABLED = true; // sätt false för att stänga av loggning
-  const MAX_LOG_ENTRIES = 100;
+  const JPEG_QUALITY = 0.65;
+  const DEBUG_LOG_ENABLED = false; // sätt false för att stänga av loggning
+  const MAX_LOG_ENTRIES = 50;
   const LOG_PREFIX = "[Time Shift Camera]";
   const debugLog = document.getElementById("debugLog");
   const logEntries = [];
